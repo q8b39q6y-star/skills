@@ -2,115 +2,128 @@
 """微博热搜抓取脚本 — 配合 gzh 内容工作台技能使用
 
 用法:
-    python hot_topics.py              # 抓取微博热搜，存到 $WEIBO_HOT_DATA_DIR（默认 ~/.weibo_hot）
+    python hot_topics.py              # 抓取微博热搜，存到 ~/.weibo_hot/
     python hot_topics.py --limit 30   # 自定义抓取条数
     python hot_topics.py --json       # 直接输出 JSON 到 stdout（不写磁盘）
+    python hot_topics.py --out DIR    # 自定义输出目录
 
-数据存储（可用 WEIBO_HOT_DATA_DIR 环境变量覆盖）:
-    ~/.weibo_hot/YYYY-MM-DD.json   # 按日期存档
+数据存储（按日期存档）:
+    ~/.weibo_hot/YYYY-MM-DD.json   # 当日快照
     ~/.weibo_hot/latest.json       # 最新一份（下游直接读这个路径）
 """
 
+import argparse
 import json
 import os
-import subprocess
+import ssl
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 
-DATA_DIR = os.environ.get(
-    "WEIBO_HOT_DATA_DIR",
-    os.path.expanduser("~/.weibo_hot"),
-)
+WEIBO_API = "https://weibo.com/ajax/side/hotSearch"
+DEFAULT_DATA_DIR = os.path.join(os.path.expanduser("~"), ".weibo_hot")
+DEFAULT_LIMIT = 30
 TIMEOUT = 15
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
 
 
-def fetch_weibo_hot(limit: int = 30) -> list[dict]:
-    """从微博热搜 API 抓取实时热榜"""
-    cmd = [
-        "curl", "-s",
-        "https://weibo.com/ajax/side/hotSearch",
-        "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "-H", "Referer: https://weibo.com",
-        "-H", "Accept: application/json, text/plain, */*",
-    ]
+def fetch_weibo_hot(limit=DEFAULT_LIMIT):
+    """从微博热搜 API 抓取实时热榜，返回 list[dict]"""
+    request = urllib.request.Request(
+        WEIBO_API,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Referer": "https://weibo.com",
+            "Accept": "application/json, text/plain, */*",
+        },
+    )
+    context = ssl.create_default_context()
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
-        if out.returncode != 0 or not out.stdout.strip():
-            return []
-        data = json.loads(out.stdout)
-        if data.get("ok") != 1:
-            err_msg = data.get("error", data.get("msg", "unknown"))
-            print(f"[warn] 微博 API 返回异常: {err_msg}", file=sys.stderr)
-            return []
-        realtime = data["data"].get("realtime", [])
-        results = []
-        for item in realtime[:limit]:
-            results.append({
+        with urllib.request.urlopen(request, timeout=TIMEOUT, context=context) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        print(f"[warn] 微博 API HTTP 错误: {exc.code}", file=sys.stderr)
+        return []
+    except urllib.error.URLError as exc:
+        print(f"[warn] 网络请求失败: {exc.reason}", file=sys.stderr)
+        return []
+    except TimeoutError:
+        print("[warn] 微博 API 请求超时", file=sys.stderr)
+        return []
+    except json.JSONDecodeError as exc:
+        print(f"[warn] 微博 API 返回非 JSON: {exc}", file=sys.stderr)
+        return []
+    except Exception as exc:  # noqa: BLE001 - 网络层兜底
+        print(f"[warn] 未知错误: {exc}", file=sys.stderr)
+        return []
+
+    if payload.get("ok") != 1:
+        message = payload.get("error") or payload.get("msg") or "unknown"
+        print(f"[warn] 微博 API 返回异常: {message}", file=sys.stderr)
+        return []
+
+    results = []
+    for item in payload.get("data", {}).get("realtime", [])[:limit]:
+        word = item.get("word", "")
+        results.append(
+            {
                 "rank": item.get("realpos"),
-                "word": item.get("word", ""),
+                "word": word,
                 "note": item.get("note", ""),
                 "heat": item.get("num"),
                 "label": item.get("label_name") or "",
-                "url": f"https://s.weibo.com/weibo?q={item.get('word', '')}",
-            })
-        return results
-    except subprocess.TimeoutExpired:
-        print("[warn] 微博 API 请求超时", file=sys.stderr)
-        return []
-    except json.JSONDecodeError as e:
-        print(f"[warn] 微博 API 返回非 JSON: {e}", file=sys.stderr)
-        return []
-    except Exception as e:
-        print(f"[warn] 未知错误: {e}", file=sys.stderr)
-        return []
+                "url": f"https://s.weibo.com/weibo?q={word}",
+            }
+        )
+    return results
 
 
-def save_results(results: list[dict]) -> str:
-    """保存结果到数据目录"""
-    os.makedirs(DATA_DIR, exist_ok=True)
+def save_results(results, data_dir):
+    """保存结果到数据目录，返回 (日期文件路径, latest 路径)"""
+    os.makedirs(data_dir, exist_ok=True)
 
-    ts = datetime.now(timezone.utc)
-    today = ts.strftime("%Y-%m-%d")
-    full_ts = ts.isoformat()
+    timestamp = datetime.now(timezone.utc)
+    today = timestamp.strftime("%Y-%m-%d")
 
     payload = {
         "source": "weibo",
-        "fetch_time": full_ts,
+        "fetch_time": timestamp.isoformat(),
         "count": len(results),
         "topics": results,
     }
 
-    # 写入按日期命名的文件
-    date_path = os.path.join(DATA_DIR, f"{today}.json")
-    with open(date_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    date_path = os.path.join(data_dir, f"{today}.json")
+    latest_path = os.path.join(data_dir, "latest.json")
 
-    # 更新 latest.json（方便下游读取）
-    latest_path = os.path.join(DATA_DIR, "latest.json")
-    with open(latest_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    for path in (date_path, latest_path):
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
 
-    return date_path
+    return date_path, latest_path
 
 
-def output_summary(results: list[dict]):
+def output_summary(results):
     """打印可读摘要"""
-    print(f"\n📡 微博热搜 TOP{len(results)}  ({datetime.now().strftime('%m-%d %H:%M')})\n")
+    print(f"\n微博热搜 TOP{len(results)}  ({datetime.now().strftime('%m-%d %H:%M')})\n")
     print(f"{'排名':<6}{'话题':<30}{'热度'}")
     print("-" * 60)
-    for r in results:
-        rank = f"#{r['rank'] or '?'}"
-        word = r["word"][:28]
-        heat = r["heat"] or 0
-        note = f" — {r['note'][:20]}" if r["note"] else ""
+    for row in results:
+        rank = f"#{row['rank'] or '?'}"
+        word = row["word"][:28]
+        heat = row["heat"] or 0
+        note = f" — {row['note'][:20]}" if row["note"] else ""
         print(f"{rank:<6}{word:<30}{heat:>6,}{note}")
 
 
 def main():
-    import argparse
     parser = argparse.ArgumentParser(description="微博热搜抓取")
-    parser.add_argument("--limit", type=int, default=30, help="抓取条数 (默认30)")
+    parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help="抓取条数 (默认30)")
     parser.add_argument("--json", action="store_true", help="直接输出 JSON 到 stdout")
+    parser.add_argument("--out", default=DEFAULT_DATA_DIR, help="输出目录 (默认 ~/.weibo_hot)")
     args = parser.parse_args()
 
     results = fetch_weibo_hot(limit=args.limit)
@@ -124,9 +137,9 @@ def main():
         return
 
     output_summary(results)
-    saved_path = save_results(results)
-    print(f"\n✅ 已保存: {saved_path}")
-    print(f"   最新:   {os.path.join(DATA_DIR, 'latest.json')}")
+    date_path, latest_path = save_results(results, args.out)
+    print(f"\n已保存: {date_path}")
+    print(f"  最新: {latest_path}")
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ metadata:
 ```
 cron 7:00/11:00/18:00
    ↓ hot_topics.py 抓微博热搜
-~/.hermes/data/weibo_hot/latest.json
+~/.weibo_hot/latest.json
    ↓ 本 skill 的"每日选题"模块
 10 个候选选题
    ↓ 用户选择
@@ -308,10 +308,12 @@ cron 7:00/11:00/18:00
 
 **自动抓取：**
 ```bash
-python3 scripts/hot_topics.py                    # 抓取并写盘到 ~/.hermes/data/weibo_hot/
+python3 scripts/hot_topics.py                    # 抓取并写盘到 ~/.weibo_hot/
 python3 scripts/hot_topics.py --limit 15         # 只抓 15 条
 python3 scripts/hot_topics.py --json             # 直接输出 JSON，不写盘
+python3 scripts/hot_topics.py --out /path/to/dir # 自定义输出目录
 ```
+脚本仅依赖 Python 标准库（urllib），无需 pip 安装任何包。
 完整脚本使用文档与数据存储路径见 `scripts/hot_topics.py` 顶部 docstring。
 
 ### 选题筛选标准
@@ -396,11 +398,14 @@ hermes cron status                            # 调度器状态（需 gateway �
 
 ```
 cron tick → scripts/hot_topics.py 抓微博热搜
-         → 写入 ~/.hermes/data/weibo_hot/latest.json
+         → 写入 ~/.weibo_hot/latest.json（脚本默认输出目录）
          → 脚本 stdout 注入 Agent prompt
          → Agent 加载本 skill 的"模块 3"生成 10 条选题
          → 推送到 Telegram（--deliver telegram）
 ```
+
+> **本节为 Hermes 专属。** 其他 agent 框架没有 `hermes cron`，需用各自的定时机制重配调度。
+> 跨框架移植详见 `references/portability.md`。
 
 **⚠️ 交付目标陷阱：** `--deliver local` 只写入 cron 自身的 session DB，不会推送到用户面前。推送必须用网关平台（telegram / discord / slack）。
 
@@ -416,5 +421,6 @@ cron tick → scripts/hot_topics.py 抓微博热搜
 
 - **脚本**：`scripts/hot_topics.py` — 微博热搜抓取 CLI
 - **参考文档**：`references/cron-deployment.md` — Hermes Cron 部署实录（含陷阱说明）
-- **参考文档**：`references/portability.md` — 跨框架移植说明（Claude Code / Codex 等）
+- **参考文档**：`references/portability.md` — 跨框架移植说明（Claude Code / Codex 等）+ GitHub 安装地址
+- **相关 skill**：`agent-skill-distribution` — 通用 skill 改造/发布/分发流程（想把本 skill 或其他 skill 上架 GitHub 时用）
 

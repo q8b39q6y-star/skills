@@ -16,8 +16,21 @@ gzh-article-generator 的 SKILL.md 用的是标准「Agent Skills」格式（YAM
 | 内容 | 位置 | 适配方式 |
 |------|------|---------|
 | `metadata.hermes` frontmatter | SKILL.md 头部 | 其他框架会忽略，无害，可留可删 |
-| 数据目录路径 | scripts/hot_topics.py | 已支持 `WEIBO_HOT_DATA_DIR` 环境变量（默认 `~/.weibo_hot`），设变量即可，无需改代码 |
-| `~/.hermes/scripts/` + cron 调度 | references/cron-deployment.md | 目标框架用各自的定时机制重配 |
+| `hermes cron` 调度命令 | SKILL.md「部署与维护」+ references/cron-deployment.md | 目标框架用各自的定时机制重配 |
+| `~/.hermes/scripts/` 脚本目录约定 | references/cron-deployment.md | 目标框架的脚本目录约定不同 |
+
+## 脚本说明
+
+`scripts/hot_topics.py` **只依赖 Python 标准库**（urllib），不需要 pip 安装任何包，也不调用外部命令。
+
+```bash
+python3 scripts/hot_topics.py              # 抓取并写盘到 ~/.weibo_hot/
+python3 scripts/hot_topics.py --limit 15   # 只抓 15 条
+python3 scripts/hot_topics.py --json       # 输出 JSON，不写盘
+python3 scripts/hot_topics.py --out DIR    # 自定义输出目录
+```
+
+数据写入 `<out>/YYYY-MM-DD.json` 和 `<out>/latest.json`（下游读 `latest.json`）。
 
 ## 安装到 Claude Code
 
@@ -34,6 +47,17 @@ Claude Code 自动发现 `~/.claude/skills/<name>/SKILL.md`。
 mkdir -p ~/.codex/skills/gzh-article-generator
 cp -r <本skill目录>/* ~/.codex/skills/gzh-article-generator/
 ```
+
+## 安装到 Hermes
+
+```bash
+hermes skills install q8b39q6y-star/skills/gzh-article-generator
+```
+
+> 若安装被安全扫描拦截（社区源 + CAUTION 判定），加 `--force`：
+> ```bash
+> hermes skills install q8b39q6y-star/skills/gzh-article-generator --force
+> ```
 
 ## 结论
 
