@@ -28,7 +28,7 @@ python3 scripts/hot_topics.py --limit 15
 ## 依赖
 
 - Python 3.9+
-- `curl`（用于抓取微博热搜 API）
+- **无第三方依赖** — 脚本只用标准库 `urllib`，无需 pip install
 
 ## 数据源状态
 
@@ -40,7 +40,7 @@ python3 scripts/hot_topics.py --limit 15
 
 ## 参考文档
 
-- `references/portability.md` — 跨框架移植说明（Claude Code / Codex / 其他）
+- `references/portability.md` — 跨框架移植说明（Claude Code / Codex / 其他）+ 安装命令
 - `references/cron-deployment.md` — Hermes Cron 部署实录（含交付目标陷阱）
 
 ## 框架专属提醒
